@@ -109,7 +109,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
                 using (var reader = new StreamReader(stream))
                 {
-                    var json = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                    var json = await reader.ReadToEndAsync().ConfigureAwait(false);
 
                     var webhookSignatureRequest = new PayPalVerifyWebhookSignatureRequest
                     {
