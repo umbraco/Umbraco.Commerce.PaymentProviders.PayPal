@@ -1,5 +1,3 @@
-using Flurl.Http;
-using Newtonsoft.Json;
 using System;
 using System.IO;
 using System.Linq;
@@ -7,19 +5,21 @@ using System.Net.Http;
 using System.Runtime.Caching;
 using System.Threading;
 using System.Threading.Tasks;
+using Flurl.Http;
+using Newtonsoft.Json;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 {
     public class PayPalClient
     {
-        private static MemoryCache AccessTokenCache = new MemoryCache("PayPalClient_AccessTokenCache");
+        private static readonly MemoryCache _accessTokenCache = new MemoryCache("PayPalClient_AccessTokenCache");
 
         public const string SandboxApiUrl = "https://api.sandbox.paypal.com";
 
         public const string LiveApiUrl = "https://api.paypal.com";
 
-        private PayPalClientConfig _config;
+        private readonly PayPalClientConfig _config;
 
         public PayPalClient(PayPalClientConfig config)
         {
@@ -176,17 +176,17 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             var cacheKey = $"{_config.BaseUrl}__{_config.ClientId}__{_config.Secret}";
 
-            if (!AccessTokenCache.Contains(cacheKey) || forceReAuthentication)
+            if (!_accessTokenCache.Contains(cacheKey) || forceReAuthentication)
             {
                 var result = await AuthenticateAsync(cancellationToken).ConfigureAwait(false);
 
-                AccessTokenCache.Set(cacheKey, result.AccessToken, new CacheItemPolicy
+                _accessTokenCache.Set(cacheKey, result.AccessToken, new CacheItemPolicy
                 {
                     AbsoluteExpiration = DateTimeOffset.UtcNow.AddSeconds(result.ExpiresIn - 5)
                 });
             }
 
-            return AccessTokenCache.Get(cacheKey).ToString();
+            return _accessTokenCache.Get(cacheKey).ToString();
         }
 
         private async Task<PayPalAccessTokenResult> AuthenticateAsync(CancellationToken cancellationToken = default)
