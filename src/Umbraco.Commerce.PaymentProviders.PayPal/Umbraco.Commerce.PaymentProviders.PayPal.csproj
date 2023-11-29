@@ -3,7 +3,6 @@
     <PropertyGroup>
       <Title>Umbraco Commerce PayPal Payment Provider</Title>
       <Description>PayPal payment provider for Umbraco Commerce</Description>
-      <TargetFramework>net8.0</TargetFramework>
     </PropertyGroup>
 
     <ItemGroup>
