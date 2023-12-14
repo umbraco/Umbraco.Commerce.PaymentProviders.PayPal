@@ -30,7 +30,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             return await RequestAsync("/v2/checkout/orders", async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(request, ct)
+                .PostJsonAsync(request, cancellationToken: ct)
                 .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -40,7 +40,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             return await RequestAsync($"/v2/checkout/orders/{orderId}", async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .GetAsync(ct)
+                .GetAsync(cancellationToken: ct)
                 .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -50,7 +50,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             return await RequestAsync($"/v2/checkout/orders/{orderId}/authorize", async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, ct)
+                .PostJsonAsync(null, cancellationToken: ct)
                 .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -60,7 +60,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             return await RequestAsync($"/v2/checkout/orders/{orderId}/capture", async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, ct)
+                .PostJsonAsync(null, cancellationToken: ct)
                 .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -70,7 +70,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             return await RequestAsync($"/v2/payments/authorizations/{paymentId}/capture", async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(new { final_capture = true }, ct)
+                .PostJsonAsync(new { final_capture = true }, cancellationToken: ct)
                 .ReceiveJson<PayPalCapturePayment>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -79,7 +79,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         public async Task<PayPalRefundPayment> RefundPaymentAsync(string paymentId, CancellationToken cancellationToken = default)
         {
             return await RequestAsync($"/v2/payments/captures/{paymentId}/refund", async (req, ct) => await req
-                .PostJsonAsync(null, ct)
+                .PostJsonAsync(null, cancellationToken: ct)
                 .ReceiveJson<PayPalRefundPayment>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -89,7 +89,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             await RequestAsync($"/v2/payments/authorizations/{paymentId}/void", async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, ct).ConfigureAwait(false),
+                .PostJsonAsync(null, cancellationToken: ct).ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -126,8 +126,8 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
                     var result = await RequestAsync("/v1/notifications/verify-webhook-signature", async (req, ct) => await req
                         .WithHeader("Content-Type", "application/json")
-                        .PostStringAsync(webhookSignatureRequestStr)
-                        .ReceiveJson<PayPalVerifyWebhookSignatureResult>(),
+                        .PostStringAsync(webhookSignatureRequestStr, cancellationToken: ct)
+                        .ReceiveJson<PayPalVerifyWebhookSignatureResult>().ConfigureAwait(false),
                         cancellationToken)
                         .ConfigureAwait(false);
 
@@ -193,7 +193,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             return await new FlurlRequest(_config.BaseUrl + "/v1/oauth2/token")
                 .WithBasicAuth(_config.ClientId, _config.Secret)
-                .PostUrlEncodedAsync(new { grant_type = "client_credentials" }, cancellationToken)
+                .PostUrlEncodedAsync(new { grant_type = "client_credentials" }, cancellationToken: cancellationToken)
                 .ReceiveJson<PayPalAccessTokenResult>()
                 .ConfigureAwait(false);
         }
