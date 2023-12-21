@@ -6,6 +6,7 @@ using System.Runtime.Caching;
 using System.Threading;
 using System.Threading.Tasks;
 using Flurl.Http;
+using Flurl.Http.Newtonsoft;
 using Newtonsoft.Json;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
@@ -149,6 +150,10 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
             {
                 var accessToken = await GetAccessTokenAsync(false, cancellationToken).ConfigureAwait(false);
                 var req = new FlurlRequest(_config.BaseUrl + url)
+                    .WithSettings(x => x.JsonSerializer = new NewtonsoftJsonSerializer(new JsonSerializerSettings
+                    {
+                        NullValueHandling = NullValueHandling.Ignore
+                    }))
                     .WithOAuthBearerToken(accessToken);
 
                 result = await func.Invoke(req, cancellationToken).ConfigureAwait(false);
@@ -159,6 +164,10 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
                 {
                     var accessToken = await GetAccessTokenAsync(true, cancellationToken).ConfigureAwait(false);
                     var req = new FlurlRequest(_config.BaseUrl + url)
+                        .WithSettings(x => x.JsonSerializer = new NewtonsoftJsonSerializer(new JsonSerializerSettings
+                        {
+                            NullValueHandling = NullValueHandling.Ignore
+                        }))
                         .WithOAuthBearerToken(accessToken);
 
                     result = await func.Invoke(req, cancellationToken).ConfigureAwait(false);
@@ -192,6 +201,10 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         private async Task<PayPalAccessTokenResult> AuthenticateAsync(CancellationToken cancellationToken = default)
         {
             return await new FlurlRequest(_config.BaseUrl + "/v1/oauth2/token")
+                .WithSettings(x => x.JsonSerializer = new NewtonsoftJsonSerializer(new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore
+                }))
                 .WithBasicAuth(_config.ClientId, _config.Secret)
                 .PostUrlEncodedAsync(new { grant_type = "client_credentials" }, cancellationToken: cancellationToken)
                 .ReceiveJson<PayPalAccessTokenResult>()
