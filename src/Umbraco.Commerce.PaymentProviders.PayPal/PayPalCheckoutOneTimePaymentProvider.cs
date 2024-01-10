@@ -1,16 +1,17 @@
 using System;
-using System.Linq;
-using Umbraco.Commerce.Core.Models;
-using Umbraco.Commerce.Core.Api;
-using Umbraco.Commerce.Core.PaymentProviders;
-using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
-using Umbraco.Commerce.PaymentProviders.PayPal.Api;
-using System.Globalization;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Umbraco.Commerce.Common.Logging;
+using Umbraco.Commerce.Core.Api;
+using Umbraco.Commerce.Core.Models;
+using Umbraco.Commerce.Core.PaymentProviders;
 using Umbraco.Commerce.Extensions;
-using System.Threading;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal
 {
@@ -34,7 +35,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         // Don't finalize at continue as we will finalize async via webhook
         public override bool FinalizeAtContinueUrl => false;
 
-        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new []{
+        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new[]{
             new TransactionMetaDataDefinition("PayPalOrderId", "PayPal Order ID")
         };
 
@@ -50,7 +51,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                 {
                     if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER."))
                     {
-                        var payPalOrder = payPalWebhookEvent.Resource.ToObject<PayPalOrder>();
+                        var payPalOrder = payPalWebhookEvent.Resource.Deserialize<PayPalOrder>();
                         if (payPalOrder?.PurchaseUnits != null && payPalOrder.PurchaseUnits.Length == 1)
                         {
                             return OrderReference.Parse(payPalOrder.PurchaseUnits[0].CustomId);
@@ -58,7 +59,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                     }
                     else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT."))
                     {
-                        var payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalPayment>();
+                        var payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalPayment>();
                         if (payPalPayment != null)
                         {
                             return OrderReference.Parse(payPalPayment.CustomId);
@@ -92,10 +93,10 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
             var payPalOrder = await client.CreateOrderAsync(
                 new PayPalCreateOrderRequest
                 {
-                    Intent = ctx.Settings.Capture 
-                        ? PayPalOrder.Intents.CAPTURE 
+                    Intent = ctx.Settings.Capture
+                        ? PayPalOrder.Intents.CAPTURE
                         : PayPalOrder.Intents.AUTHORIZE,
-                    PurchaseUnits = new[] 
+                    PurchaseUnits = new[]
                     {
                         new PayPalPurchaseUnitRequest
                         {
@@ -147,9 +148,9 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                     if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER."))
                     {
-                        var webhookPayPalOrder = payPalWebhookEvent.Resource.ToObject<PayPalOrder>();
+                        var webhookPayPalOrder = payPalWebhookEvent.Resource.Deserialize<PayPalOrder>();
 
-                        // Fetch persisted order as it may have changed since the webhook 
+                        // Fetch persisted order as it may have changed since the webhook
                         // was initially sent (it could be a webhook resend)
                         var persistedPayPalOrder = await client.GetOrderAsync(webhookPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
 
@@ -184,15 +185,15 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         // issues if they were to overlap and cause concurrency issues?
                         if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION)
                         {
-                            payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalAuthorizationPayment>();
+                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalAuthorizationPayment>();
                         }
                         else if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE)
                         {
-                            payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalCapturePayment>();
+                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalCapturePayment>();
                         }
                         else if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.REFUND)
                         {
-                            payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalRefundPayment>();
+                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalRefundPayment>();
                         }
                     }
 
