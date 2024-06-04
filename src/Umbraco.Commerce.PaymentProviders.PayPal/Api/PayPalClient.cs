@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Flurl.Http;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Exceptions;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
@@ -49,22 +50,54 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
         public async Task<PayPalOrder> AuthorizeOrderAsync(string orderId, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync($"/v2/checkout/orders/{orderId}/authorize", async (req, ct) => await req
-                .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, cancellationToken: ct)
-                .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
+            try
+            {
+                PayPalOrder paypalOrder = await RequestAsync(
+                $"/v2/checkout/orders/{orderId}/authorize",
+                async (req, ct) => await req
+                    .WithHeader("Prefer", "return=representation")
+                    .PostJsonAsync(null, cancellationToken: ct)
+                    .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
+
+                return paypalOrder;
+            }
+            catch (FlurlHttpException ex)
+            {
+                if (ex.Call.Response.StatusCode == 422)
+                {
+                    throw new PaymentDeclinedException();
+                }
+
+                throw;
+            }
         }
 
         public async Task<PayPalOrder> CaptureOrderAsync(string orderId, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync($"/v2/checkout/orders/{orderId}/capture", async (req, ct) => await req
-                .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, cancellationToken: ct)
-                .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
-                cancellationToken)
-                .ConfigureAwait(false);
+            try
+            {
+                PayPalOrder paypalOrder = await RequestAsync(
+                    $"/v2/checkout/orders/{orderId}/capture",
+                    async (req, ct) => await req
+                        .WithHeader("Prefer", "return=representation")
+                        .PostJsonAsync(null, cancellationToken: ct)
+                        .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
+                    cancellationToken)
+                    .ConfigureAwait(false);
+
+                return paypalOrder;
+            }
+            catch (FlurlHttpException ex)
+            {
+                if (ex.Call.Response.StatusCode == 422)
+                {
+                    throw new PaymentDeclinedException();
+                }
+
+                throw;
+            }
         }
 
         public async Task<PayPalCapturePayment> CapturePaymentAsync(string paymentId, CancellationToken cancellationToken = default)

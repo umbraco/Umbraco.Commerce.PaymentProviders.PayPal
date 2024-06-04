@@ -11,6 +11,7 @@ using Umbraco.Commerce.Core.Models;
 using Umbraco.Commerce.Core.PaymentProviders;
 using Umbraco.Commerce.Extensions;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Exceptions;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal
@@ -156,19 +157,45 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                         if (persistedPayPalOrder.Intent == PayPalOrder.Intents.AUTHORIZE)
                         {
-                            // Authorize
-                            payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
+                            try
+                            {
+                                // Authorize
+                                payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
                                 ? persistedPayPalOrder
                                 : await client.AuthorizeOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (PaymentDeclinedException)
+                            {
+                                return CallbackResult.Ok(new TransactionInfo
+                                {
+                                    PaymentStatus = PaymentStatus.Error,
+                                    TransactionId = persistedPayPalOrder.Id,
+                                });
+
+                                throw;
+                            }
 
                             payPalPayment = payPalOrder.PurchaseUnits[0].Payments?.Authorizations?.FirstOrDefault();
                         }
                         else
                         {
                             // Capture
-                            payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
-                                ? persistedPayPalOrder
-                                : await client.CaptureOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            try
+                            {
+                                payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
+                                    ? persistedPayPalOrder
+                                    : await client.CaptureOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (PaymentDeclinedException)
+                            {
+                                return CallbackResult.Ok(new TransactionInfo
+                                {
+                                    PaymentStatus = PaymentStatus.Error,
+                                    TransactionId = persistedPayPalOrder.Id,
+                                });
+
+                                throw;
+                            }
 
                             payPalPayment = payPalOrder.PurchaseUnits[0].Payments?.Captures?.FirstOrDefault();
                         }
