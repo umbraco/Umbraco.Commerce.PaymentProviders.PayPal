@@ -1,16 +1,17 @@
 using System;
-using System.Linq;
-using Umbraco.Commerce.Core.Models;
-using Umbraco.Commerce.Core.Api;
-using Umbraco.Commerce.Core.PaymentProviders;
-using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
-using Umbraco.Commerce.PaymentProviders.PayPal.Api;
-using System.Globalization;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Umbraco.Commerce.Common.Logging;
+using Umbraco.Commerce.Core.Api;
+using Umbraco.Commerce.Core.Models;
+using Umbraco.Commerce.Core.PaymentProviders;
 using Umbraco.Commerce.Extensions;
-using System.Threading;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Exceptions;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal
 {
@@ -34,7 +35,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         // Don't finalize at continue as we will finalize async via webhook
         public override bool FinalizeAtContinueUrl => false;
 
-        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new []{
+        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new[]{
             new TransactionMetaDataDefinition("PayPalOrderId", "PayPal Order ID")
         };
 
@@ -92,10 +93,10 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
             var payPalOrder = await client.CreateOrderAsync(
                 new PayPalCreateOrderRequest
                 {
-                    Intent = ctx.Settings.Capture 
-                        ? PayPalOrder.Intents.CAPTURE 
+                    Intent = ctx.Settings.Capture
+                        ? PayPalOrder.Intents.CAPTURE
                         : PayPalOrder.Intents.AUTHORIZE,
-                    PurchaseUnits = new[] 
+                    PurchaseUnits = new[]
                     {
                         new PayPalPurchaseUnitRequest
                         {
@@ -155,19 +156,45 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                         if (persistedPayPalOrder.Intent == PayPalOrder.Intents.AUTHORIZE)
                         {
-                            // Authorize
-                            payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
+                            try
+                            {
+                                // Authorize
+                                payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
                                 ? persistedPayPalOrder
                                 : await client.AuthorizeOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (PaymentDeclinedException)
+                            {
+                                return CallbackResult.Ok(new TransactionInfo
+                                {
+                                    PaymentStatus = PaymentStatus.Error,
+                                    TransactionId = persistedPayPalOrder.Id,
+                                });
+
+                                throw;
+                            }
 
                             payPalPayment = payPalOrder.PurchaseUnits[0].Payments?.Authorizations?.FirstOrDefault();
                         }
                         else
                         {
                             // Capture
-                            payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
-                                ? persistedPayPalOrder
-                                : await client.CaptureOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            try
+                            {
+                                payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
+                                    ? persistedPayPalOrder
+                                    : await client.CaptureOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (PaymentDeclinedException)
+                            {
+                                return CallbackResult.Ok(new TransactionInfo
+                                {
+                                    PaymentStatus = PaymentStatus.Error,
+                                    TransactionId = persistedPayPalOrder.Id,
+                                });
+
+                                throw;
+                            }
 
                             payPalPayment = payPalOrder.PurchaseUnits[0].Payments?.Captures?.FirstOrDefault();
                         }
