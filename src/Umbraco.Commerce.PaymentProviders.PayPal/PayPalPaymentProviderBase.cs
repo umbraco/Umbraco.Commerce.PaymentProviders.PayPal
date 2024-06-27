@@ -41,7 +41,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
             }
             else
             {
-                payPalWebhookEvent = await client.ParseWebhookEventAsync(ctx.Request, cancellationToken).ConfigureAwait(false);
+                payPalWebhookEvent = await client.ParseWebhookEventAsync(ctx.HttpContext.Request, cancellationToken).ConfigureAwait(false);
 
                 ctx.AdditionalData.Add("UmbracoCommerce_PayPalWebhookEvent", payPalWebhookEvent);
             }

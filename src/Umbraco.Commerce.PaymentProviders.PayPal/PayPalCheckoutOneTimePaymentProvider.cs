@@ -16,12 +16,13 @@ using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal
 {
-    [PaymentProvider("paypal-checkout-onetime", "PayPal Checkout (One Time)", "PayPal Checkout payment provider for one time payments")]
+    [PaymentProvider("paypal-checkout-onetime")]
     public class PayPalCheckoutOneTimePaymentProvider : PayPalPaymentProviderBase<PayPalCheckoutOneTimeSettings>
     {
-        private ILogger<PayPalCheckoutOneTimePaymentProvider> _logger;
+        private readonly ILogger<PayPalCheckoutOneTimePaymentProvider> _logger;
 
-        public PayPalCheckoutOneTimePaymentProvider(UmbracoCommerceContext ctx,
+        public PayPalCheckoutOneTimePaymentProvider(
+            UmbracoCommerceContext ctx,
             ILogger<PayPalCheckoutOneTimePaymentProvider> logger)
             : base(ctx)
         {
