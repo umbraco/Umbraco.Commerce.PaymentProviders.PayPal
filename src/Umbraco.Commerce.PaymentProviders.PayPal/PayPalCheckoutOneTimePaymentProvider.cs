@@ -122,7 +122,9 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                 cancellationToken).ConfigureAwait(false);
 
             // Setup the payment form to redirect to approval link
-            var approveLink = payPalOrder.Links.FirstOrDefault(x => x.Rel == "approve");
+            const string REL_APPROVE = "approve";
+            var approveLink = payPalOrder.Links.FirstOrDefault(x => x.Rel == REL_APPROVE)
+                ?? throw new InvalidOperationException($"PayPal order link with {nameof(PayPalHateoasLink.Rel)}=\"{REL_APPROVE}\" was null.");
             var approveLinkMethod = (PaymentFormMethod)Enum.Parse(typeof(PaymentFormMethod), approveLink.Method, true);
 
             return new PaymentFormResult()
