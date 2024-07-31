@@ -1,5 +1,5 @@
 export default {
-    paymentProviders: {
+    ucPaymentProviders: {
         'paypalCheckoutOnetimeLabel': 'PayPal Checkout (One Time)',
         'paypalCheckoutOnetimeDescription': 'PayPal Checkout payment provider for one time payments',
         'paypalCheckoutOnetimeSettingsContinueUrlLabel': 'Continue URL',
