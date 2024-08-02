@@ -16,12 +16,13 @@ using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal
 {
-    [PaymentProvider("paypal-checkout-onetime", "PayPal Checkout (One Time)", "PayPal Checkout payment provider for one time payments")]
+    [PaymentProvider("paypal-checkout-onetime")]
     public class PayPalCheckoutOneTimePaymentProvider : PayPalPaymentProviderBase<PayPalCheckoutOneTimeSettings>
     {
-        private ILogger<PayPalCheckoutOneTimePaymentProvider> _logger;
+        private readonly ILogger<PayPalCheckoutOneTimePaymentProvider> _logger;
 
-        public PayPalCheckoutOneTimePaymentProvider(UmbracoCommerceContext ctx,
+        public PayPalCheckoutOneTimePaymentProvider(
+            UmbracoCommerceContext ctx,
             ILogger<PayPalCheckoutOneTimePaymentProvider> logger)
             : base(ctx)
         {
@@ -36,8 +37,9 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         // Don't finalize at continue as we will finalize async via webhook
         public override bool FinalizeAtContinueUrl => false;
 
-        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new[]{
-            new TransactionMetaDataDefinition("PayPalOrderId", "PayPal Order ID")
+        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new[]
+        {
+            new TransactionMetaDataDefinition("PayPalOrderId"),
         };
 
         public override async Task<OrderReference> GetOrderReferenceAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> ctx, CancellationToken cancellationToken = default)
@@ -50,7 +52,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                 if (payPalWebhookEvent != null)
                 {
-                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER."))
+                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER.", StringComparison.InvariantCultureIgnoreCase))
                     {
                         var payPalOrder = payPalWebhookEvent.Resource.Deserialize<PayPalOrder>();
                         if (payPalOrder?.PurchaseUnits != null && payPalOrder.PurchaseUnits.Length == 1)
@@ -58,7 +60,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                             return OrderReference.Parse(payPalOrder.PurchaseUnits[0].CustomId);
                         }
                     }
-                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT."))
+                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT.", StringComparison.InvariantCultureIgnoreCase))
                     {
                         var payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalPayment>();
                         if (payPalPayment != null)
@@ -147,7 +149,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                     PayPalOrder payPalOrder = null;
                     PayPalPayment payPalPayment = null;
 
-                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER."))
+                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER.", StringComparison.InvariantCultureIgnoreCase))
                     {
                         var webhookPayPalOrder = payPalWebhookEvent.Resource.Deserialize<PayPalOrder>();
 
@@ -203,7 +205,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         // Store the paypal order ID
                         metaData.Add("PayPalOrderId", payPalOrder.Id);
                     }
-                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT."))
+                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT.", StringComparison.InvariantCultureIgnoreCase))
                     {
                         // Listen for payment changes and update the status accordingly
                         // NB: These tend to be pretty delayed so shouldn't cause a huge issue but it's worth knowing
