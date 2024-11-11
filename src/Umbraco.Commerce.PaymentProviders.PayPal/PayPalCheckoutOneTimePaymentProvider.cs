@@ -81,7 +81,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         public override async Task<PaymentFormResult> GenerateFormAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> ctx, CancellationToken cancellationToken = default)
         {
             // Get currency information
-            var currency = Context.Services.CurrencyService.GetCurrency(ctx.Order.CurrencyId);
+            var currency = await Context.Services.CurrencyService.GetCurrencyAsync(ctx.Order.CurrencyId);
             var currencyCode = currency.Code.ToUpperInvariant();
 
             // Ensure currency has valid ISO 4217 code
@@ -347,7 +347,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                     await client.CancelPaymentAsync(ctx.Order.TransactionInfo.TransactionId, cancellationToken).ConfigureAwait(false);
 
-                    // Cancel payment enpoint doesn't return a result so if the request is successfull 
+                    // Cancel payment enpoint doesn't return a result so if the request is successfull
                     // then we'll deem it as successfull and directly set the payment status to Cancelled
                     return new ApiResult()
                     {
