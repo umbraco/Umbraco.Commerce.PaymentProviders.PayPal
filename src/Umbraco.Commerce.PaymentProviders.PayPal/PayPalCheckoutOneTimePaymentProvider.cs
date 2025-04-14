@@ -33,6 +33,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         public override bool CanCapturePayments => true;
         public override bool CanCancelPayments => true;
         public override bool CanRefundPayments => true;
+        public override bool CanPartiallyRefundPayments => true;
 
         // Don't finalize at continue as we will finalize async via webhook
         public override bool FinalizeAtContinueUrl => false;
@@ -87,7 +88,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
             // Ensure currency has valid ISO 4217 code
             if (!Iso4217.CurrencyCodes.ContainsKey(currencyCode))
             {
-                throw new Exception("Currency must be a valid ISO 4217 currency code: " + currency.Name);
+                throw new PayPalPaymentProviderGeneralException("Currency must be a valid ISO 4217 currency code: " + currency.Name);
             }
 
             // Create the order
@@ -146,8 +147,8 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                 {
                     var metaData = new Dictionary<string, string>();
 
-                    PayPalOrder payPalOrder = null;
-                    PayPalPayment payPalPayment = null;
+                    PayPalOrder? payPalOrder = null;
+                    PayPalPayment? payPalPayment = null;
 
                     if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER.", StringComparison.InvariantCultureIgnoreCase))
                     {
@@ -223,6 +224,19 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         else if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.REFUND)
                         {
                             payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalRefundPayment>();
+                            switch (payPalPayment?.Status)
+                            {
+                                case PayPalRefundPayment.Statuses.COMPLETED:
+                                    return CallbackResult.Empty;
+
+                                case PayPalRefundPayment.Statuses.PENDING:
+                                case PayPalRefundPayment.Statuses.CANCELLED:
+                                    _logger.Warn($"Refund request for order '{ctx.Order.TransactionInfo.TransactionId}' has been issued but the status is '{payPalPayment.Status}'. PayPal resource id: '{payPalPayment.Id}'.");
+                                    return CallbackResult.Empty;
+
+                                default:
+                                    throw new PayPalPaymentProviderGeneralException($"Refund request for order '{ctx.Order.TransactionInfo.TransactionId}' failed. PayPal resource id: '{payPalPayment?.Id}'.");
+                            }
                         }
                     }
 
@@ -230,7 +244,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         new TransactionInfo
                         {
                             AmountAuthorized = decimal.Parse(payPalPayment?.Amount.Value ?? "0.00", CultureInfo.InvariantCulture),
-                            TransactionId = payPalPayment?.Id ?? ctx.Order.TransactionInfo.TransactionId ?? "",
+                            TransactionId = payPalPayment?.Id ?? ctx.Order.TransactionInfo.TransactionId ?? string.Empty,
                             PaymentStatus = payPalOrder != null
                                 ? GetPaymentStatus(payPalOrder)
                                 : GetPaymentStatus(payPalPayment)
@@ -307,24 +321,63 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
             return ApiResult.Empty;
         }
 
-        public override async Task<ApiResult> RefundPaymentAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> ctx, CancellationToken cancellationToken = default)
+        [Obsolete("Will be removed in v17. Use the overload that takes an order refund request")]
+        public override async Task<ApiResult?> RefundPaymentAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> context, CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(context);
+
+            StoreReadOnly store = await Context.Services.StoreService.GetStoreAsync(context.Order.StoreId);
+            Amount refundAmount = store.CanRefundTransactionFee ? context.Order.TransactionInfo.AmountAuthorized + context.Order.TransactionInfo.TransactionFee : context.Order.TransactionInfo.AmountAuthorized;
+            return await RefundPaymentAsync(
+                context,
+                new PaymentProviderOrderRefundRequest
+                {
+                    RefundAmount = refundAmount,
+                    Orderlines = context.Order.OrderLines.Select(x => new PaymentProviderOrderlineRefundRequest
+                    {
+                        OrderLineId = x.OrderId,
+                        Quantity = x.Quantity,
+                    }),
+                },
+                cancellationToken);
+        }
+
+        public override async Task<ApiResult?> RefundPaymentAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> context, PaymentProviderOrderRefundRequest refundRequest, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            ArgumentNullException.ThrowIfNull(refundRequest);
+
             try
             {
-                if (ctx.Order.TransactionInfo.PaymentStatus == PaymentStatus.Captured)
+                if (context.Order.TransactionInfo.PaymentStatus
+                    is PaymentStatus.Captured or PaymentStatus.PartiallyRefunded)
                 {
-                    var clientConfig = GetPayPalClientConfig(ctx.Settings);
-                    var client = new PayPalClient(clientConfig);
+                    // Get currency information
+                    CurrencyReadOnly currency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
+                    string currencyCode = currency.Code.ToUpperInvariant();
 
-                    var payPalPayment = await client.RefundPaymentAsync(ctx.Order.TransactionInfo.TransactionId, cancellationToken).ConfigureAwait(false);
+                    PayPalClientConfig clientConfig = GetPayPalClientConfig(context.Settings);
+                    PayPalClient client = new(clientConfig);
+                    PayPalRefundPayment payPalPayment = await client.RefundPaymentAsync(
+                        new PaypalClientRefundRequest
+                        {
+                            PaymentId = context.Order.TransactionInfo.TransactionId,
+                            Amount = new PayPalAmount
+                            {
+                                Value = refundRequest.RefundAmount.ToString("0.00", CultureInfo.InvariantCulture),
+                                CurrencyCode = currencyCode,
+                            }
+                        },
+                        cancellationToken).ConfigureAwait(false);
 
                     return new ApiResult()
                     {
                         TransactionInfo = new TransactionInfoUpdate()
                         {
-                            TransactionId = payPalPayment.Id,
+                            // Need to keep the paypal capture resource id after a partial refund in order to do more refunds later on
+                            TransactionId = context.Order.TransactionInfo.TransactionId,
                             PaymentStatus = GetPaymentStatus(payPalPayment)
-                        }
+                        },
                     };
                 }
             }

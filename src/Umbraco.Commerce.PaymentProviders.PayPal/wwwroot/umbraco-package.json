@@ -13,5 +13,5 @@
             "js": "/App_Plugins/UmbracoCommercePaypalPaymentProvider/lang/en.js"
         }
     ],
-    "version": ""
+    "version": "15.1.0"
 }
