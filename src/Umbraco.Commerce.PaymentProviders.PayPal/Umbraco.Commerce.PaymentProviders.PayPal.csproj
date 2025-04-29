@@ -3,6 +3,8 @@
       <Title>Umbraco Commerce PayPal Payment Provider</Title>
       <Description>PayPal payment provider for Umbraco Commerce</Description>
       <StaticWebAssetBasePath>App_Plugins/UmbracoCommercePaypalPaymentProvider</StaticWebAssetBasePath>
+      <NoWarn>IDE0022;CA2007;IDE0058;IDE0290;</NoWarn>
+      <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <ItemGroup>

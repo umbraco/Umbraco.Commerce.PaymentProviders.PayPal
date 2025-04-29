@@ -40,6 +40,6 @@ export default {
         'paypalCheckoutOnetimeSettingsCaptureDescription': 'Flag indicating whether to immediately capture the payment, or whether to just authorize the payment for later (manual) capture',
 
         // metadata
-        'paypalCheckoutOnetimeMetadataPayPalOrderIdLabel': "PayPal Order ID",
+        'paypalCheckoutOnetimeMetaDataPayPalOrderIdLabel': "PayPal Order ID",
     },
 };

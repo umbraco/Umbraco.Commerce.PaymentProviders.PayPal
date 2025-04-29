@@ -116,12 +116,42 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
                 .ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Send a full refund request.
+        /// </summary>
+        /// <param name="paymentId"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
         public async Task<PayPalRefundPayment> RefundPaymentAsync(string paymentId, CancellationToken cancellationToken = default)
         {
             return await RequestAsync(
                 $"/v2/payments/captures/{paymentId}/refund",
                 async (req, ct) => await req
                 .PostJsonAsync(null, cancellationToken: ct)
+                .ReceiveJson<PayPalRefundPayment>().ConfigureAwait(false),
+                cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Send a refund request with additional information, such as an amount object for a partial refund.
+        /// </summary>
+        /// <param name="refundRequest"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public async Task<PayPalRefundPayment> RefundPaymentAsync(PaypalClientRefundRequest refundRequest, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(refundRequest);
+
+            return await RequestAsync(
+                $"/v2/payments/captures/{refundRequest.PaymentId}/refund",
+                async (req, ct) => await req
+                .PostJsonAsync(
+                    new
+                    {
+                        amount = refundRequest.Amount,
+                    },
+                    cancellationToken: ct)
                 .ReceiveJson<PayPalRefundPayment>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);

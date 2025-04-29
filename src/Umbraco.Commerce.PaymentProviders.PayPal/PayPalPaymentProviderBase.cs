@@ -1,11 +1,11 @@
 using System.Linq;
-using Umbraco.Commerce.Core.Models;
+using System.Threading;
+using System.Threading.Tasks;
 using Umbraco.Commerce.Core.Api;
+using Umbraco.Commerce.Core.Models;
 using Umbraco.Commerce.Core.PaymentProviders;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
-using System.Threading.Tasks;
-using System.Threading;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal
 {
@@ -99,8 +99,9 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                     case PayPalCapturePayment.Statuses.DECLINED:
                         return PaymentStatus.Error;
                     case PayPalCapturePayment.Statuses.REFUNDED:
-                    case PayPalCapturePayment.Statuses.PARTIALLY_REFUNDED:
                         return PaymentStatus.Refunded;
+                    case PayPalCapturePayment.Statuses.PARTIALLY_REFUNDED:
+                        return PaymentStatus.PartiallyRefunded;
                 }
             }
             else if (payment is PayPalAuthorizationPayment authPayment)
@@ -140,21 +141,11 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         {
             if (!settings.SandboxMode)
             {
-                return new LivePayPalClientConfig
-                {
-                    ClientId = settings.LiveClientId,
-                    Secret = settings.LiveSecret,
-                    WebhookId = settings.LiveWebhookId
-                };
+                return new LivePayPalClientConfig(settings.LiveClientId, settings.LiveSecret, settings.LiveWebhookId);
             }
             else
             {
-                return new SandboxPayPalClientConfig
-                {
-                    ClientId = settings.SandboxClientId,
-                    Secret = settings.SandboxSecret,
-                    WebhookId = settings.SandboxWebhookId
-                };
+                return new SandboxPayPalClientConfig(settings.SandboxClientId, settings.SandboxSecret, settings.SandboxWebhookId);
             }
         }
     }
