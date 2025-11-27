@@ -1,25 +1,28 @@
 using System;
-using System.Linq;
-using Umbraco.Commerce.Core.Models;
-using Umbraco.Commerce.Core.Api;
-using Umbraco.Commerce.Core.PaymentProviders;
-using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
-using Umbraco.Commerce.PaymentProviders.PayPal.Api;
-using System.Globalization;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Umbraco.Commerce.Common.Logging;
+using Umbraco.Commerce.Core.Api;
+using Umbraco.Commerce.Core.Models;
+using Umbraco.Commerce.Core.PaymentProviders;
 using Umbraco.Commerce.Extensions;
-using System.Threading;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Exceptions;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal
 {
-    [PaymentProvider("paypal-checkout-onetime", "PayPal Checkout (One Time)", "PayPal Checkout payment provider for one time payments")]
+    [PaymentProvider("paypal-checkout-onetime")]
     public class PayPalCheckoutOneTimePaymentProvider : PayPalPaymentProviderBase<PayPalCheckoutOneTimeSettings>
     {
-        private ILogger<PayPalCheckoutOneTimePaymentProvider> _logger;
+        private readonly ILogger<PayPalCheckoutOneTimePaymentProvider> _logger;
 
-        public PayPalCheckoutOneTimePaymentProvider(UmbracoCommerceContext ctx,
+        public PayPalCheckoutOneTimePaymentProvider(
+            UmbracoCommerceContext ctx,
             ILogger<PayPalCheckoutOneTimePaymentProvider> logger)
             : base(ctx)
         {
@@ -30,12 +33,14 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         public override bool CanCapturePayments => true;
         public override bool CanCancelPayments => true;
         public override bool CanRefundPayments => true;
+        public override bool CanPartiallyRefundPayments => true;
 
         // Don't finalize at continue as we will finalize async via webhook
         public override bool FinalizeAtContinueUrl => false;
 
-        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new []{
-            new TransactionMetaDataDefinition("PayPalOrderId", "PayPal Order ID")
+        public override IEnumerable<TransactionMetaDataDefinition> TransactionMetaDataDefinitions => new[]
+        {
+            new TransactionMetaDataDefinition("PayPalOrderId"),
         };
 
         public override async Task<OrderReference> GetOrderReferenceAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> ctx, CancellationToken cancellationToken = default)
@@ -48,17 +53,17 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                 if (payPalWebhookEvent != null)
                 {
-                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER."))
+                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER.", StringComparison.InvariantCultureIgnoreCase))
                     {
-                        var payPalOrder = payPalWebhookEvent.Resource.ToObject<PayPalOrder>();
+                        var payPalOrder = payPalWebhookEvent.Resource.Deserialize<PayPalOrder>();
                         if (payPalOrder?.PurchaseUnits != null && payPalOrder.PurchaseUnits.Length == 1)
                         {
                             return OrderReference.Parse(payPalOrder.PurchaseUnits[0].CustomId);
                         }
                     }
-                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT."))
+                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT.", StringComparison.InvariantCultureIgnoreCase))
                     {
-                        var payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalPayment>();
+                        var payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalPayment>();
                         if (payPalPayment != null)
                         {
                             return OrderReference.Parse(payPalPayment.CustomId);
@@ -77,13 +82,13 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
         public override async Task<PaymentFormResult> GenerateFormAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> ctx, CancellationToken cancellationToken = default)
         {
             // Get currency information
-            var currency = Context.Services.CurrencyService.GetCurrency(ctx.Order.CurrencyId);
+            var currency = await Context.Services.CurrencyService.GetCurrencyAsync(ctx.Order.CurrencyId);
             var currencyCode = currency.Code.ToUpperInvariant();
 
             // Ensure currency has valid ISO 4217 code
             if (!Iso4217.CurrencyCodes.ContainsKey(currencyCode))
             {
-                throw new Exception("Currency must be a valid ISO 4217 currency code: " + currency.Name);
+                throw new PayPalPaymentProviderGeneralException("Currency must be a valid ISO 4217 currency code: " + currency.Name);
             }
 
             // Create the order
@@ -92,10 +97,10 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
             var payPalOrder = await client.CreateOrderAsync(
                 new PayPalCreateOrderRequest
                 {
-                    Intent = ctx.Settings.Capture 
-                        ? PayPalOrder.Intents.CAPTURE 
+                    Intent = ctx.Settings.Capture
+                        ? PayPalOrder.Intents.CAPTURE
                         : PayPalOrder.Intents.AUTHORIZE,
-                    PurchaseUnits = new[] 
+                    PurchaseUnits = new[]
                     {
                         new PayPalPurchaseUnitRequest
                         {
@@ -142,32 +147,58 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                 {
                     var metaData = new Dictionary<string, string>();
 
-                    PayPalOrder payPalOrder = null;
-                    PayPalPayment payPalPayment = null;
+                    PayPalOrder? payPalOrder = null;
+                    PayPalPayment? payPalPayment = null;
 
-                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER."))
+                    if (payPalWebhookEvent.EventType.StartsWith("CHECKOUT.ORDER.", StringComparison.InvariantCultureIgnoreCase))
                     {
-                        var webhookPayPalOrder = payPalWebhookEvent.Resource.ToObject<PayPalOrder>();
+                        var webhookPayPalOrder = payPalWebhookEvent.Resource.Deserialize<PayPalOrder>();
 
-                        // Fetch persisted order as it may have changed since the webhook 
+                        // Fetch persisted order as it may have changed since the webhook
                         // was initially sent (it could be a webhook resend)
                         var persistedPayPalOrder = await client.GetOrderAsync(webhookPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
 
                         if (persistedPayPalOrder.Intent == PayPalOrder.Intents.AUTHORIZE)
                         {
-                            // Authorize
-                            payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
+                            try
+                            {
+                                // Authorize
+                                payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
                                 ? persistedPayPalOrder
                                 : await client.AuthorizeOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (PaymentDeclinedException)
+                            {
+                                return CallbackResult.Ok(new TransactionInfo
+                                {
+                                    PaymentStatus = PaymentStatus.Error,
+                                    TransactionId = persistedPayPalOrder.Id,
+                                });
+
+                                throw;
+                            }
 
                             payPalPayment = payPalOrder.PurchaseUnits[0].Payments?.Authorizations?.FirstOrDefault();
                         }
                         else
                         {
                             // Capture
-                            payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
-                                ? persistedPayPalOrder
-                                : await client.CaptureOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            try
+                            {
+                                payPalOrder = persistedPayPalOrder.Status != PayPalOrder.Statuses.APPROVED
+                                    ? persistedPayPalOrder
+                                    : await client.CaptureOrderAsync(persistedPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (PaymentDeclinedException)
+                            {
+                                return CallbackResult.Ok(new TransactionInfo
+                                {
+                                    PaymentStatus = PaymentStatus.Error,
+                                    TransactionId = persistedPayPalOrder.Id,
+                                });
+
+                                throw;
+                            }
 
                             payPalPayment = payPalOrder.PurchaseUnits[0].Payments?.Captures?.FirstOrDefault();
                         }
@@ -175,7 +206,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         // Store the paypal order ID
                         metaData.Add("PayPalOrderId", payPalOrder.Id);
                     }
-                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT."))
+                    else if (payPalWebhookEvent.EventType.StartsWith("PAYMENT.", StringComparison.InvariantCultureIgnoreCase))
                     {
                         // Listen for payment changes and update the status accordingly
                         // NB: These tend to be pretty delayed so shouldn't cause a huge issue but it's worth knowing
@@ -184,15 +215,28 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         // issues if they were to overlap and cause concurrency issues?
                         if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION)
                         {
-                            payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalAuthorizationPayment>();
+                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalAuthorizationPayment>();
                         }
                         else if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE)
                         {
-                            payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalCapturePayment>();
+                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalCapturePayment>();
                         }
                         else if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.REFUND)
                         {
-                            payPalPayment = payPalWebhookEvent.Resource.ToObject<PayPalRefundPayment>();
+                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalRefundPayment>();
+                            switch (payPalPayment?.Status)
+                            {
+                                case PayPalRefundPayment.Statuses.COMPLETED:
+                                    return CallbackResult.Empty;
+
+                                case PayPalRefundPayment.Statuses.PENDING:
+                                case PayPalRefundPayment.Statuses.CANCELLED:
+                                    _logger.Warn($"Refund request for order '{ctx.Order.TransactionInfo.TransactionId}' has been issued but the status is '{payPalPayment.Status}'. PayPal resource id: '{payPalPayment.Id}'.");
+                                    return CallbackResult.Empty;
+
+                                default:
+                                    throw new PayPalPaymentProviderGeneralException($"Refund request for order '{ctx.Order.TransactionInfo.TransactionId}' failed. PayPal resource id: '{payPalPayment?.Id}'.");
+                            }
                         }
                     }
 
@@ -200,7 +244,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         new TransactionInfo
                         {
                             AmountAuthorized = decimal.Parse(payPalPayment?.Amount.Value ?? "0.00", CultureInfo.InvariantCulture),
-                            TransactionId = payPalPayment?.Id ?? ctx.Order.TransactionInfo.TransactionId ?? "",
+                            TransactionId = payPalPayment?.Id ?? ctx.Order.TransactionInfo.TransactionId ?? string.Empty,
                             PaymentStatus = payPalOrder != null
                                 ? GetPaymentStatus(payPalOrder)
                                 : GetPaymentStatus(payPalPayment)
@@ -277,24 +321,42 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
             return ApiResult.Empty;
         }
 
-        public override async Task<ApiResult> RefundPaymentAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> ctx, CancellationToken cancellationToken = default)
+        public override async Task<ApiResult?> RefundPaymentAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> context, PaymentProviderOrderRefundRequest refundRequest, CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(context);
+            ArgumentNullException.ThrowIfNull(refundRequest);
+
             try
             {
-                if (ctx.Order.TransactionInfo.PaymentStatus == PaymentStatus.Captured)
+                if (context.Order.TransactionInfo.PaymentStatus
+                    is PaymentStatus.Captured or PaymentStatus.PartiallyRefunded)
                 {
-                    var clientConfig = GetPayPalClientConfig(ctx.Settings);
-                    var client = new PayPalClient(clientConfig);
+                    // Get currency information
+                    CurrencyReadOnly currency = await Context.Services.CurrencyService.GetCurrencyAsync(context.Order.CurrencyId);
+                    string currencyCode = currency.Code.ToUpperInvariant();
 
-                    var payPalPayment = await client.RefundPaymentAsync(ctx.Order.TransactionInfo.TransactionId, cancellationToken).ConfigureAwait(false);
+                    PayPalClientConfig clientConfig = GetPayPalClientConfig(context.Settings);
+                    PayPalClient client = new(clientConfig);
+                    PayPalRefundPayment payPalPayment = await client.RefundPaymentAsync(
+                        new PaypalClientRefundRequest
+                        {
+                            PaymentId = context.Order.TransactionInfo.TransactionId,
+                            Amount = new PayPalAmount
+                            {
+                                Value = refundRequest.RefundAmount.ToString("0.00", CultureInfo.InvariantCulture),
+                                CurrencyCode = currencyCode,
+                            }
+                        },
+                        cancellationToken).ConfigureAwait(false);
 
                     return new ApiResult()
                     {
                         TransactionInfo = new TransactionInfoUpdate()
                         {
-                            TransactionId = payPalPayment.Id,
+                            // Need to keep the paypal capture resource id after a partial refund in order to do more refunds later on
+                            TransactionId = context.Order.TransactionInfo.TransactionId,
                             PaymentStatus = GetPaymentStatus(payPalPayment)
-                        }
+                        },
                     };
                 }
             }
@@ -317,7 +379,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                     await client.CancelPaymentAsync(ctx.Order.TransactionInfo.TransactionId, cancellationToken).ConfigureAwait(false);
 
-                    // Cancel payment enpoint doesn't return a result so if the request is successfull 
+                    // Cancel payment enpoint doesn't return a result so if the request is successfull
                     // then we'll deem it as successfull and directly set the payment status to Cancelled
                     return new ApiResult()
                     {

@@ -1,25 +1,27 @@
-using Flurl.Http;
-using Newtonsoft.Json;
 using System;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Runtime.Caching;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using Flurl.Http;
+using Microsoft.AspNetCore.Http;
+using Umbraco.Commerce.PaymentProviders.PayPal.Api.Exceptions;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
 namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 {
     public class PayPalClient
     {
-        private static MemoryCache AccessTokenCache = new MemoryCache("PayPalClient_AccessTokenCache");
+        private static readonly MemoryCache _accessTokenCache = new MemoryCache("PayPalClient_AccessTokenCache");
 
         public const string SandboxApiUrl = "https://api.sandbox.paypal.com";
 
         public const string LiveApiUrl = "https://api.paypal.com";
 
-        private PayPalClientConfig _config;
+        private readonly PayPalClientConfig _config;
 
         public PayPalClient(PayPalClientConfig config)
         {
@@ -28,9 +30,11 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
         public async Task<PayPalOrder> CreateOrderAsync(PayPalCreateOrderRequest request, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync("/v2/checkout/orders", async (req, ct) => await req
+            return await RequestAsync(
+                "/v2/checkout/orders",
+                async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(request, ct)
+                .PostJsonAsync(request, cancellationToken: ct)
                 .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -38,9 +42,11 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
         public async Task<PayPalOrder> GetOrderAsync(string orderId, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync($"/v2/checkout/orders/{orderId}", async (req, ct) => await req
+            return await RequestAsync(
+                $"/v2/checkout/orders/{orderId}",
+                async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .GetAsync(ct)
+                .GetAsync(cancellationToken: ct)
                 .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -48,38 +54,104 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
         public async Task<PayPalOrder> AuthorizeOrderAsync(string orderId, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync($"/v2/checkout/orders/{orderId}/authorize", async (req, ct) => await req
-                .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, ct)
-                .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
+            try
+            {
+                PayPalOrder paypalOrder = await RequestAsync(
+                $"/v2/checkout/orders/{orderId}/authorize",
+                async (req, ct) => await req
+                    .WithHeader("Prefer", "return=representation")
+                    .PostJsonAsync(null, cancellationToken: ct)
+                    .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
+
+                return paypalOrder;
+            }
+            catch (FlurlHttpException ex)
+            {
+                if (ex.Call.Response.StatusCode == 422)
+                {
+                    throw new PaymentDeclinedException();
+                }
+
+                throw;
+            }
         }
 
         public async Task<PayPalOrder> CaptureOrderAsync(string orderId, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync($"/v2/checkout/orders/{orderId}/capture", async (req, ct) => await req
-                .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, ct)
-                .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
-                cancellationToken)
-                .ConfigureAwait(false);
+            try
+            {
+                PayPalOrder paypalOrder = await RequestAsync(
+                    $"/v2/checkout/orders/{orderId}/capture",
+                    async (req, ct) => await req
+                        .WithHeader("Prefer", "return=representation")
+                        .PostJsonAsync(null, cancellationToken: ct)
+                        .ReceiveJson<PayPalOrder>().ConfigureAwait(false),
+                    cancellationToken)
+                    .ConfigureAwait(false);
+
+                return paypalOrder;
+            }
+            catch (FlurlHttpException ex)
+            {
+                if (ex.Call.Response.StatusCode == 422)
+                {
+                    throw new PaymentDeclinedException();
+                }
+
+                throw;
+            }
         }
 
         public async Task<PayPalCapturePayment> CapturePaymentAsync(string paymentId, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync($"/v2/payments/authorizations/{paymentId}/capture", async (req, ct) => await req
+            return await RequestAsync(
+                $"/v2/payments/authorizations/{paymentId}/capture",
+                async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(new { final_capture = true }, ct)
+                .PostJsonAsync(new { final_capture = true }, cancellationToken: ct)
                 .ReceiveJson<PayPalCapturePayment>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Send a full refund request.
+        /// </summary>
+        /// <param name="paymentId"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
         public async Task<PayPalRefundPayment> RefundPaymentAsync(string paymentId, CancellationToken cancellationToken = default)
         {
-            return await RequestAsync($"/v2/payments/captures/{paymentId}/refund", async (req, ct) => await req
-                .PostJsonAsync(null, ct)
+            return await RequestAsync(
+                $"/v2/payments/captures/{paymentId}/refund",
+                async (req, ct) => await req
+                .PostJsonAsync(null, cancellationToken: ct)
+                .ReceiveJson<PayPalRefundPayment>().ConfigureAwait(false),
+                cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Send a refund request with additional information, such as an amount object for a partial refund.
+        /// </summary>
+        /// <param name="refundRequest"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public async Task<PayPalRefundPayment> RefundPaymentAsync(PaypalClientRefundRequest refundRequest, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(refundRequest);
+
+            return await RequestAsync(
+                $"/v2/payments/captures/{refundRequest.PaymentId}/refund",
+                async (req, ct) => await req
+                .PostJsonAsync(
+                    new
+                    {
+                        amount = refundRequest.Amount,
+                    },
+                    cancellationToken: ct)
                 .ReceiveJson<PayPalRefundPayment>().ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
@@ -87,20 +159,22 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
         public async Task CancelPaymentAsync(string paymentId, CancellationToken cancellationToken = default)
         {
-            await RequestAsync($"/v2/payments/authorizations/{paymentId}/void", async (req, ct) => await req
+            await RequestAsync(
+                $"/v2/payments/authorizations/{paymentId}/void",
+                async (req, ct) => await req
                 .WithHeader("Prefer", "return=representation")
-                .PostJsonAsync(null, ct).ConfigureAwait(false),
+                .PostJsonAsync(null, cancellationToken: ct).ConfigureAwait(false),
                 cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        public async Task<PayPalWebhookEvent> ParseWebhookEventAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+        public async Task<PayPalWebhookEvent> ParseWebhookEventAsync(HttpRequest request, CancellationToken cancellationToken = default)
         {
-            var payPalWebhookEvent = default(PayPalWebhookEvent);
+            ArgumentNullException.ThrowIfNull(request);
+            IHeaderDictionary headers = request.Headers;
 
-            var headers = request.Headers;
-
-            using (var stream = await request.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
+            PayPalWebhookEvent payPalWebhookEvent = default;
+            using (Stream stream = request.Body)
             {
                 if (stream.CanSeek)
                 {
@@ -113,27 +187,30 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
 
                     var webhookSignatureRequest = new PayPalVerifyWebhookSignatureRequest
                     {
-                        AuthAlgorithm = headers.GetValues("paypal-auth-algo").FirstOrDefault(),
-                        CertUrl = headers.GetValues("paypal-cert-url").FirstOrDefault(),
-                        TransmissionId = headers.GetValues("paypal-transmission-id").FirstOrDefault(),
-                        TransmissionSignature = headers.GetValues("paypal-transmission-sig").FirstOrDefault(),
-                        TransmissionTime = headers.GetValues("paypal-transmission-time").FirstOrDefault(),
+                        AuthAlgorithm = headers["paypal-auth-algo"].FirstOrDefault(),
+                        CertUrl = headers["paypal-cert-url"].FirstOrDefault(),
+                        TransmissionId = headers["paypal-transmission-id"].FirstOrDefault(),
+                        TransmissionSignature = headers["paypal-transmission-sig"].FirstOrDefault(),
+                        TransmissionTime = headers["paypal-transmission-time"].FirstOrDefault(),
                         WebhookId = _config.WebhookId,
                         WebhookEvent = new { }
                     };
 
-                    var webhookSignatureRequestStr = JsonConvert.SerializeObject(webhookSignatureRequest).Replace("{}", json);
+                    string webhookSignatureRequestStr = JsonSerializer.Serialize(webhookSignatureRequest).Replace("{}", json, StringComparison.InvariantCulture);
 
-                    var result = await RequestAsync("/v1/notifications/verify-webhook-signature", async (req, ct) => await req
-                        .WithHeader("Content-Type", "application/json")
-                        .PostStringAsync(webhookSignatureRequestStr)
-                        .ReceiveJson<PayPalVerifyWebhookSignatureResult>(),
-                        cancellationToken)
+                    PayPalVerifyWebhookSignatureResult result = await RequestAsync(
+                            "/v1/notifications/verify-webhook-signature",
+                            async (req, ct) => await req
+                                .WithHeader("Content-Type", "application/json")
+                                .PostStringAsync(webhookSignatureRequestStr, cancellationToken: ct)
+                                .ReceiveJson<PayPalVerifyWebhookSignatureResult>()
+                                .ConfigureAwait(false),
+                            cancellationToken)
                         .ConfigureAwait(false);
 
                     if (result != null && result.VerificationStatus == "SUCCESS")
                     {
-                        payPalWebhookEvent = JsonConvert.DeserializeObject<PayPalWebhookEvent>(json);
+                        payPalWebhookEvent = JsonSerializer.Deserialize<PayPalWebhookEvent>(json);
                     }
                 }
             }
@@ -148,7 +225,11 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
             try
             {
                 var accessToken = await GetAccessTokenAsync(false, cancellationToken).ConfigureAwait(false);
-                var req = new FlurlRequest(_config.BaseUrl + url)
+                FlurlRequest req = new FlurlRequest(_config.BaseUrl + url)
+                    .WithSettings(x => x.JsonSerializer = new CustomFlurlJsonSerializer(new JsonSerializerOptions
+                    {
+                        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                    }))
                     .WithOAuthBearerToken(accessToken);
 
                 result = await func.Invoke(req, cancellationToken).ConfigureAwait(false);
@@ -158,7 +239,11 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
                 if (ex.Call.Response.StatusCode == 401)
                 {
                     var accessToken = await GetAccessTokenAsync(true, cancellationToken).ConfigureAwait(false);
-                    var req = new FlurlRequest(_config.BaseUrl + url)
+                    FlurlRequest req = new FlurlRequest(_config.BaseUrl + url)
+                        .WithSettings(x => x.JsonSerializer = new CustomFlurlJsonSerializer(new JsonSerializerOptions
+                        {
+                            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                        }))
                         .WithOAuthBearerToken(accessToken);
 
                     result = await func.Invoke(req, cancellationToken).ConfigureAwait(false);
@@ -176,24 +261,28 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         {
             var cacheKey = $"{_config.BaseUrl}__{_config.ClientId}__{_config.Secret}";
 
-            if (!AccessTokenCache.Contains(cacheKey) || forceReAuthentication)
+            if (!_accessTokenCache.Contains(cacheKey) || forceReAuthentication)
             {
-                var result = await AuthenticateAsync(cancellationToken).ConfigureAwait(false);
+                PayPalAccessTokenResult result = await AuthenticateAsync(cancellationToken).ConfigureAwait(false);
 
-                AccessTokenCache.Set(cacheKey, result.AccessToken, new CacheItemPolicy
+                _accessTokenCache.Set(cacheKey, result.AccessToken, new CacheItemPolicy
                 {
                     AbsoluteExpiration = DateTimeOffset.UtcNow.AddSeconds(result.ExpiresIn - 5)
                 });
             }
 
-            return AccessTokenCache.Get(cacheKey).ToString();
+            return _accessTokenCache.Get(cacheKey).ToString();
         }
 
         private async Task<PayPalAccessTokenResult> AuthenticateAsync(CancellationToken cancellationToken = default)
         {
             return await new FlurlRequest(_config.BaseUrl + "/v1/oauth2/token")
+                .WithSettings(x => x.JsonSerializer = new CustomFlurlJsonSerializer(new JsonSerializerOptions
+                {
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                }))
                 .WithBasicAuth(_config.ClientId, _config.Secret)
-                .PostUrlEncodedAsync(new { grant_type = "client_credentials" }, cancellationToken)
+                .PostUrlEncodedAsync(new { grant_type = "client_credentials" }, cancellationToken: cancellationToken)
                 .ReceiveJson<PayPalAccessTokenResult>()
                 .ConfigureAwait(false);
         }

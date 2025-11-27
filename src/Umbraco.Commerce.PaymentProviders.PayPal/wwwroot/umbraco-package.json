@@ -1,0 +1,17 @@
+{
+    "name": "Umbraco Commerce Paypal Payment Provider",
+    "$schema": "../umbraco-package-schema.json",
+    "extensions": [
+        {
+            "type": "localization",
+            "alias": "UmbracoCommerce.PaymentProviders.Paypal.Localization.En",
+            "weight": -100,
+            "name": "English",
+            "meta": {
+                "culture": "en"
+            },
+            "js": "/App_Plugins/UmbracoCommercePaypalPaymentProvider/lang/en.js"
+        }
+    ],
+    "version": "15.1.0"
+}

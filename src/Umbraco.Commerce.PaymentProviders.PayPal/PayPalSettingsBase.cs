@@ -4,65 +4,53 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 {
     public class PayPalSettingsBase
     {
-        [PaymentProviderSetting(Name = "Continue URL", 
-            Description = "The URL to continue to after this provider has done processing. eg: /continue/",
+        [PaymentProviderSetting(
             SortOrder = 100)]
         public string ContinueUrl { get; set; }
 
-        [PaymentProviderSetting(Name = "Cancel URL", 
-            Description = "The URL to return to if the payment attempt is canceled. eg: /cancel/",
+        [PaymentProviderSetting(
             SortOrder = 200)]
         public string CancelUrl { get; set; }
 
-        [PaymentProviderSetting(Name = "Error URL",
-            Description = "The URL to return to if the payment attempt errors. eg: /error/",
+        [PaymentProviderSetting(
             SortOrder = 300)]
         public string ErrorUrl { get; set; }
 
-        [PaymentProviderSetting(Name = "Sandbox Client ID",
-            Description = "Your sandbox PayPal client id",
+        [PaymentProviderSetting(
             SortOrder = 400)]
         public string SandboxClientId { get; set; }
 
-        [PaymentProviderSetting(Name = "Sandbox Secret",
-            Description = "Your sandbox PayPal secret",
+        [PaymentProviderSetting(
             SortOrder = 500)]
         public string SandboxSecret { get; set; }
 
-        [PaymentProviderSetting(Name = "Sandbox Webhook ID",
-            Description = "Your sandbox PayPal webhook id",
+        [PaymentProviderSetting(
             SortOrder = 600)]
         public string SandboxWebhookId { get; set; }
 
-        [PaymentProviderSetting(Name = "Live Client ID",
-            Description = "Your live PayPal client id",
+        [PaymentProviderSetting(
             SortOrder = 700)]
         public string LiveClientId { get; set; }
 
-        [PaymentProviderSetting(Name = "Live Secret",
-            Description = "Your live PayPal secret",
+        [PaymentProviderSetting(
             SortOrder = 800)]
         public string LiveSecret { get; set; }
 
-        [PaymentProviderSetting(Name = "Live Webhook ID",
-            Description = "Your live PayPal webhook id",
+        [PaymentProviderSetting(
             SortOrder = 900)]
         public string LiveWebhookId { get; set; }
 
-        [PaymentProviderSetting(Name = "Sandbox Mode",
-            Description = "Set whether to process payments in sandbox mode.",
+        [PaymentProviderSetting(
             SortOrder = 1000000)]
         public bool SandboxMode { get; set; }
 
         // Advanced settings
-        [PaymentProviderSetting(Name = "Brand Name",
-            Description = "A brand name to override the business name with on the PayPal Checkout pages ",
+        [PaymentProviderSetting(
             SortOrder = 100,
             IsAdvanced = true)]
         public string BrandName { get; set; }
 
-        [PaymentProviderSetting(Name = "Order Description",
-            Description = "A description to display next to the PayPal order line, defaults to the order number if not set",
+        [PaymentProviderSetting(
             SortOrder = 110,
             IsAdvanced = true)]
         public string OrderDescription { get; set; }
