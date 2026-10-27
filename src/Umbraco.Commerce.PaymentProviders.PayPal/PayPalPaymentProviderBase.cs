@@ -63,17 +63,19 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                 var purchaseUnit = payPalOrder.PurchaseUnits[0];
                 if (purchaseUnit.Payments != null)
                 {
-                    if (purchaseUnit.Payments.Refunds != null && purchaseUnit.Payments.Refunds.Length > 0)
-                    {
-                        payPalPayment = purchaseUnit.Payments.Refunds.First();
-                    }
-                    else if (purchaseUnit.Payments.Captures != null && purchaseUnit.Payments.Captures.Length > 0)
+                    // Prefer the capture over any refunds as its status reflects whether the
+                    // payment is partially or fully refunded, and its id is needed for later refunds
+                    if (purchaseUnit.Payments.Captures != null && purchaseUnit.Payments.Captures.Length > 0)
                     {
                         payPalPayment = purchaseUnit.Payments.Captures.First();
                     }
                     else if (purchaseUnit.Payments.Authorizations != null && purchaseUnit.Payments.Authorizations.Length > 0)
                     {
                         payPalPayment = purchaseUnit.Payments.Authorizations.First();
+                    }
+                    else if (purchaseUnit.Payments.Refunds != null && purchaseUnit.Payments.Refunds.Length > 0)
+                    {
+                        payPalPayment = purchaseUnit.Payments.Refunds.First();
                     }
 
                     if (payPalPayment != null)
