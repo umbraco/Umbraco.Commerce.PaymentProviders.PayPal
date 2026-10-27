@@ -338,6 +338,10 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                     PayPalClientConfig clientConfig = GetPayPalClientConfig(context.Settings);
                     PayPalClient client = new(clientConfig);
+
+                    // Commerce records the refund after this call, so the refundable amount is still the pre-refund balance
+                    decimal refundableAmount = await context.Order.CalculateRefundableAmountAsync();
+
                     PayPalRefundPayment payPalPayment = await client.RefundPaymentAsync(
                         new PaypalClientRefundRequest
                         {
@@ -351,10 +355,9 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         cancellationToken).ConfigureAwait(false);
 
                     // A completed refund is only a full refund if it covers the remaining refundable amount
-                    // (this runs before Commerce records the refund against the order)
                     PaymentStatus refundStatus = GetPaymentStatus(payPalPayment);
                     if (refundStatus == PaymentStatus.Refunded
-                        && await context.Order.CalculateRefundableAmountAsync() != refundRequest.RefundAmount)
+                        && refundRequest.RefundAmount < refundableAmount)
                     {
                         refundStatus = PaymentStatus.PartiallyRefunded;
                     }
