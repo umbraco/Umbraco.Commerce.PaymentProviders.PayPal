@@ -1,5 +1,4 @@
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
 using Umbraco.Commerce.Core.Models;
 using Umbraco.Commerce.PaymentProviders.PayPal.Api.Models;
 
