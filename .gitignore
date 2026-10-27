@@ -482,3 +482,5 @@ $RECYCLE.BIN/
 ## Umbraco Commerce specific
 ##
 /src/Umbraco.Commerce.PaymentProviders.PayPal/packages.lock.json
+tests/Umbraco.Commerce.PaymentProviders.PayPal.UnitTests/packages.lock.json
+
