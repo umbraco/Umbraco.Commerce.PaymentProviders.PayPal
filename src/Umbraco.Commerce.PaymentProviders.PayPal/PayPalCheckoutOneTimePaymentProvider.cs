@@ -160,7 +160,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
                         if (!IsForOrder(persistedPayPalOrder.PurchaseUnits?.Length == 1 ? persistedPayPalOrder.PurchaseUnits[0].CustomId : null, ctx.Order))
                         {
-                            _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: PayPal order '{persistedPayPalOrder.Id}' belongs to a different order.");
+                            _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: PayPal order '{persistedPayPalOrder.Id}' doesn't refer to this order.");
                             return CallbackResult.Empty;
                         }
 
@@ -226,9 +226,15 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                             // was initially sent (it could be a webhook resend)
                             payPalPayment = await FetchPaymentAsync(client, payPalWebhookEvent, cancellationToken).ConfigureAwait(false);
 
-                            if (!IsForOrder(payPalPayment?.CustomId, ctx.Order))
+                            if (payPalPayment == null)
                             {
-                                _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: PayPal payment '{payPalPayment?.Id}' belongs to a different order.");
+                                _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: the payment it refers to couldn't be found.");
+                                return CallbackResult.Empty;
+                            }
+
+                            if (!IsForOrder(payPalPayment.CustomId, ctx.Order))
+                            {
+                                _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: PayPal payment '{payPalPayment.Id}' doesn't refer to this order.");
                                 return CallbackResult.Empty;
                             }
                         }

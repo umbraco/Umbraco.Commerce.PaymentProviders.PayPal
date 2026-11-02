@@ -224,25 +224,23 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
                         WebhookId = _config.WebhookId,
                     };
 
-                    string webhookSignatureRequestStr = CreateVerifyWebhookSignatureRequestBody(webhookSignatureRequest, json);
-                    if (webhookSignatureRequestStr == null)
+                    string? webhookSignatureRequestStr = CreateVerifyWebhookSignatureRequestBody(webhookSignatureRequest, json);
+                    if (webhookSignatureRequestStr != null)
                     {
-                        return null;
-                    }
+                        PayPalVerifyWebhookSignatureResult result = await RequestAsync(
+                                "/v1/notifications/verify-webhook-signature",
+                                async (req, ct) => await req
+                                    .WithHeader("Content-Type", "application/json")
+                                    .PostStringAsync(webhookSignatureRequestStr, cancellationToken: ct)
+                                    .ReceiveJson<PayPalVerifyWebhookSignatureResult>()
+                                    .ConfigureAwait(false),
+                                cancellationToken)
+                            .ConfigureAwait(false);
 
-                    PayPalVerifyWebhookSignatureResult result = await RequestAsync(
-                            "/v1/notifications/verify-webhook-signature",
-                            async (req, ct) => await req
-                                .WithHeader("Content-Type", "application/json")
-                                .PostStringAsync(webhookSignatureRequestStr, cancellationToken: ct)
-                                .ReceiveJson<PayPalVerifyWebhookSignatureResult>()
-                                .ConfigureAwait(false),
-                            cancellationToken)
-                        .ConfigureAwait(false);
-
-                    if (result != null && result.VerificationStatus == "SUCCESS")
-                    {
-                        payPalWebhookEvent = JsonSerializer.Deserialize<PayPalWebhookEvent>(json);
+                        if (result != null && result.VerificationStatus == "SUCCESS")
+                        {
+                            payPalWebhookEvent = JsonSerializer.Deserialize<PayPalWebhookEvent>(json);
+                        }
                     }
                 }
             }
@@ -254,7 +252,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
         /// Builds the verify-webhook-signature request body. The webhook event is embedded exactly as
         /// received, and must be a JSON object; returns <c>null</c> if it isn't.
         /// </summary>
-        internal static string CreateVerifyWebhookSignatureRequestBody(PayPalVerifyWebhookSignatureRequest request, string webhookEventJson)
+        internal static string? CreateVerifyWebhookSignatureRequestBody(PayPalVerifyWebhookSignatureRequest request, string webhookEventJson)
         {
             ArgumentNullException.ThrowIfNull(request);
 
@@ -281,6 +279,7 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
             using var buffer = new MemoryStream();
             using (var writer = new Utf8JsonWriter(buffer))
             {
+                // Property names match the [JsonPropertyName] attributes on PayPalVerifyWebhookSignatureRequest
                 writer.WriteStartObject();
                 writer.WriteString("auth_algo", request.AuthAlgorithm);
                 writer.WriteString("cert_url", request.CertUrl);
