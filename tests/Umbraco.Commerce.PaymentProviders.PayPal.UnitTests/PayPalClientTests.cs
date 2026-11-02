@@ -303,6 +303,19 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.UnitTests
             PayPalCheckoutOneTimePaymentProvider.IsForOrder("not-a-reference", order).Should().BeFalse();
         }
 
+        [Theory]
+        [InlineData(PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION, true)]
+        [InlineData(PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE, true)]
+        [InlineData(PayPalWebhookEvent.ResourceTypes.Payment.REFUND, true)]
+        [InlineData("sale", false)]
+        [InlineData("payouts_item", false)]
+        [InlineData("", false)]
+        [InlineData(null, false)]
+        public void Only_Authorization_Capture_And_Refund_Payment_Webhooks_Are_Handled(string? resourceType, bool handled)
+        {
+            PayPalCheckoutOneTimePaymentProvider.IsHandledPaymentResourceType(resourceType).Should().Be(handled);
+        }
+
         private static HttpRequest WebhookRequest(string body = WebhookJson, string transmissionId = "TX-1")
         {
             var context = new DefaultHttpContext();
