@@ -88,6 +88,19 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.UnitTests
             => new() { Id = id, Status = status };
 
         // GetPaymentStatus is protected, so expose it through a thin subclass
+        [Theory]
+        [InlineData(PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION, true)]
+        [InlineData(PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE, true)]
+        [InlineData(PayPalWebhookEvent.ResourceTypes.Payment.REFUND, true)]
+        [InlineData("sale", false)]
+        [InlineData("payouts_item", false)]
+        [InlineData("", false)]
+        [InlineData(null, false)]
+        public void Only_Authorization_Capture_And_Refund_Payment_Webhooks_Are_Handled(string? resourceType, bool handled)
+        {
+            PayPalCheckoutOneTimePaymentProvider.IsHandledPaymentResourceType(resourceType).Should().Be(handled);
+        }
+
         private sealed class TestablePayPalProvider : PayPalCheckoutOneTimePaymentProvider
         {
             public TestablePayPalProvider()
