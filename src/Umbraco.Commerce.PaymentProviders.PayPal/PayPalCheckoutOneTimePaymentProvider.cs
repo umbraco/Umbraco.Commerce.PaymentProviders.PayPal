@@ -158,6 +158,12 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         // was initially sent (it could be a webhook resend)
                         var persistedPayPalOrder = await client.GetOrderAsync(webhookPayPalOrder.Id, cancellationToken).ConfigureAwait(false);
 
+                        if (!IsForOrder(persistedPayPalOrder.PurchaseUnits?.Length == 1 ? persistedPayPalOrder.PurchaseUnits[0].CustomId : null, ctx.Order))
+                        {
+                            _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: PayPal order '{persistedPayPalOrder.Id}' doesn't refer to this order.");
+                            return CallbackResult.Empty;
+                        }
+
                         if (persistedPayPalOrder.Intent == PayPalOrder.Intents.AUTHORIZE)
                         {
                             try
@@ -213,13 +219,24 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         // that these will be notified after clicking the cancel / capture / refund buttons too so
                         // effectively the order will get updated twice. It's important to know as it could cause
                         // issues if they were to overlap and cause concurrency issues?
-                        if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION)
+                        if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION
+                            || payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE)
                         {
-                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalAuthorizationPayment>();
-                        }
-                        else if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE)
-                        {
-                            payPalPayment = payPalWebhookEvent.Resource.Deserialize<PayPalCapturePayment>();
+                            // Fetch the persisted payment as it may have changed since the webhook
+                            // was initially sent (it could be a webhook resend)
+                            payPalPayment = await FetchPaymentAsync(client, payPalWebhookEvent, cancellationToken).ConfigureAwait(false);
+
+                            if (payPalPayment == null)
+                            {
+                                _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: the payment it refers to couldn't be found.");
+                                return CallbackResult.Empty;
+                            }
+
+                            if (!IsForOrder(payPalPayment.CustomId, ctx.Order))
+                            {
+                                _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: PayPal payment '{payPalPayment.Id}' doesn't refer to this order.");
+                                return CallbackResult.Empty;
+                            }
                         }
                         else if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.REFUND)
                         {
@@ -259,6 +276,40 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
             return CallbackResult.BadRequest();
         }
+
+        /// <summary>
+        /// Fetches the authorization or capture a <c>PAYMENT.*</c> webhook event refers to from PayPal.
+        /// </summary>
+        internal static async Task<PayPalPayment?> FetchPaymentAsync(PayPalClient client, PayPalWebhookEvent payPalWebhookEvent, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(client);
+            ArgumentNullException.ThrowIfNull(payPalWebhookEvent);
+
+            var paymentId = payPalWebhookEvent.Resource?.Deserialize<PayPalPayment>()?.Id;
+            if (string.IsNullOrWhiteSpace(paymentId))
+            {
+                return null;
+            }
+
+            return payPalWebhookEvent.ResourceType switch
+            {
+                PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION => await client.GetAuthorizationPaymentAsync(paymentId, cancellationToken).ConfigureAwait(false),
+                PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE => await client.GetCapturePaymentAsync(paymentId, cancellationToken).ConfigureAwait(false),
+                _ => null,
+            };
+        }
+
+        /// <summary>
+        /// Checks a PayPal <c>custom_id</c> refers to the given order.
+        /// </summary>
+        internal static bool IsForOrder(string? customId, OrderReadOnly order)
+            => order != null && IsForOrder(customId, order.GenerateOrderReference());
+
+        internal static bool IsForOrder(string? customId, OrderReference orderReference)
+            => orderReference != null
+                && !string.IsNullOrEmpty(customId)
+                && OrderReference.TryParse(customId, out OrderReference? parsed)
+                && orderReference.Equals(parsed);
 
         public override async Task<ApiResult> FetchPaymentStatusAsync(PaymentProviderContext<PayPalCheckoutOneTimeSettings> ctx, CancellationToken cancellationToken = default)
         {
