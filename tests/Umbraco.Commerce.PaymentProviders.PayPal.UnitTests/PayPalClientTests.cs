@@ -197,15 +197,121 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.UnitTests
             evt.Should().BeNull();
         }
 
-        private static HttpRequest WebhookRequest()
+        [Fact]
+        public async Task Webhook_Header_Values_Are_Sent_As_Plain_Strings()
+        {
+            const string transmissionId = "TX-{}\"1";
+            using var httpTest = new HttpTest();
+            httpTest.RespondWithJson(Token("TOKEN-1")).RespondWithJson(new { verification_status = "SUCCESS" });
+            PayPalClient client = CreateClient(out _);
+
+            await client.ParseWebhookEventAsync(WebhookRequest(transmissionId: transmissionId));
+
+            FlurlCall verify = httpTest.CallLog.Single(c => c.Request.Url.Path.EndsWith("/v1/notifications/verify-webhook-signature", StringComparison.Ordinal));
+            JsonObject body = JsonNode.Parse(verify.RequestBody)!.AsObject();
+            body.Select(x => x.Key).Should().BeEquivalentTo(
+                "auth_algo", "cert_url", "transmission_id", "transmission_sig", "transmission_time", "webhook_id", "webhook_event");
+            body["transmission_id"]!.GetValue<string>().Should().Be(transmissionId);
+            body["webhook_id"]!.GetValue<string>().Should().Be("WEBHOOK-ID-1");
+            body["webhook_event"]!["id"]!.GetValue<string>().Should().Be("WH-58D329510W468432D-8HN650336L201105X");
+        }
+
+        [Fact]
+        public async Task Webhook_Event_Is_Sent_For_Verification_Exactly_As_Received()
+        {
+            using var httpTest = new HttpTest();
+            httpTest.RespondWithJson(Token("TOKEN-1")).RespondWithJson(new { verification_status = "SUCCESS" });
+            PayPalClient client = CreateClient(out _);
+
+            await client.ParseWebhookEventAsync(WebhookRequest());
+
+            FlurlCall verify = httpTest.CallLog.Single(c => c.Request.Url.Path.EndsWith("/v1/notifications/verify-webhook-signature", StringComparison.Ordinal));
+            verify.RequestBody.Should().Contain(WebhookJson);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("not json")]
+        [InlineData("[1,2]")]
+        [InlineData("{\"id\": \"WH-1\"} {}")]
+        public async Task Webhook_Body_That_Is_Not_A_Json_Object_Is_Ignored_Without_Calling_PayPal(string webhookBody)
+        {
+            using var httpTest = new HttpTest();
+            PayPalClient client = CreateClient(out _);
+
+            PayPalWebhookEvent evt = await client.ParseWebhookEventAsync(WebhookRequest(body: webhookBody));
+
+            evt.Should().BeNull();
+            httpTest.CallLog.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task Payment_Webhook_Uses_The_Capture_Fetched_From_PayPal()
+        {
+            using var httpTest = new HttpTest();
+            httpTest.RespondWithJson(Token("TOKEN-1")).RespondWith("""
+                { "id": "3C679366HH908993F", "status": "REFUNDED", "custom_id": "store-1:order-1", "amount": { "currency_code": "EUR", "value": "100.00" } }
+                """);
+            PayPalClient client = CreateClient(out _);
+            var evt = new PayPalWebhookEvent
+            {
+                EventType = "PAYMENT.CAPTURE.COMPLETED",
+                ResourceType = PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE,
+                Resource = JsonNode.Parse("""{ "id": "3C679366HH908993F", "status": "COMPLETED", "custom_id": "store-1:order-2", "amount": { "currency_code": "EUR", "value": "1.00" } }""")!.AsObject(),
+            };
+
+            PayPalPayment? payment = await PayPalCheckoutOneTimePaymentProvider.FetchPaymentAsync(client, evt);
+
+            httpTest.ShouldHaveCalled("*/v2/payments/captures/3C679366HH908993F").WithVerb(HttpMethod.Get);
+            payment.Should().BeOfType<PayPalCapturePayment>();
+            payment!.Status.Should().Be(PayPalCapturePayment.Statuses.REFUNDED);
+            payment.CustomId.Should().Be("store-1:order-1");
+            payment.Amount.Value.Should().Be("100.00");
+        }
+
+        [Fact]
+        public async Task Authorization_Webhook_Uses_The_Authorization_Fetched_From_PayPal()
+        {
+            using var httpTest = new HttpTest();
+            httpTest.RespondWithJson(Token("TOKEN-1")).RespondWith("""
+                { "id": "0VF52814937998046", "status": "VOIDED", "custom_id": "store-1:order-1", "amount": { "currency_code": "EUR", "value": "100.00" } }
+                """);
+            PayPalClient client = CreateClient(out _);
+            var evt = new PayPalWebhookEvent
+            {
+                EventType = "PAYMENT.AUTHORIZATION.CREATED",
+                ResourceType = PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION,
+                Resource = JsonNode.Parse("""{ "id": "0VF52814937998046", "status": "CREATED" }""")!.AsObject(),
+            };
+
+            PayPalPayment? payment = await PayPalCheckoutOneTimePaymentProvider.FetchPaymentAsync(client, evt);
+
+            httpTest.ShouldHaveCalled("*/v2/payments/authorizations/0VF52814937998046").WithVerb(HttpMethod.Get);
+            payment.Should().BeOfType<PayPalAuthorizationPayment>();
+            payment!.Status.Should().Be(PayPalAuthorizationPayment.Statuses.VOIDED);
+        }
+
+        [Fact]
+        public void Custom_Id_Must_Refer_To_The_Order_Being_Processed()
+        {
+            var order = new OrderReference(Guid.NewGuid(), "ORDER-01");
+            var otherOrder = new OrderReference(Guid.NewGuid(), "ORDER-02");
+
+            PayPalCheckoutOneTimePaymentProvider.IsForOrder(order, order).Should().BeTrue();
+            PayPalCheckoutOneTimePaymentProvider.IsForOrder(otherOrder, order).Should().BeFalse();
+            PayPalCheckoutOneTimePaymentProvider.IsForOrder(null, order).Should().BeFalse();
+            PayPalCheckoutOneTimePaymentProvider.IsForOrder("not-a-reference", order).Should().BeFalse();
+        }
+
+        private static HttpRequest WebhookRequest(string body = WebhookJson, string transmissionId = "TX-1")
         {
             var context = new DefaultHttpContext();
             context.Request.Method = "POST";
             context.Request.ContentType = "application/json";
-            context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(WebhookJson));
+            context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
             context.Request.Headers["paypal-auth-algo"] = "SHA256withRSA";
             context.Request.Headers["paypal-cert-url"] = "https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1";
-            context.Request.Headers["paypal-transmission-id"] = "TX-1";
+            context.Request.Headers["paypal-transmission-id"] = transmissionId;
             context.Request.Headers["paypal-transmission-sig"] = "SIG==";
             context.Request.Headers["paypal-transmission-time"] = "2026-11-02T10:00:01Z";
             return context.Request;
