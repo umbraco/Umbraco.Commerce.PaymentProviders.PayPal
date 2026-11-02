@@ -219,6 +219,12 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                         // that these will be notified after clicking the cancel / capture / refund buttons too so
                         // effectively the order will get updated twice. It's important to know as it could cause
                         // issues if they were to overlap and cause concurrency issues?
+                        if (!IsHandledPaymentResourceType(payPalWebhookEvent.ResourceType))
+                        {
+                            _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: '{payPalWebhookEvent.EventType}' events for '{payPalWebhookEvent.ResourceType}' resources aren't handled.");
+                            return CallbackResult.Empty;
+                        }
+
                         if (payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION
                             || payPalWebhookEvent.ResourceType == PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE)
                         {
@@ -256,6 +262,11 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
                             }
                         }
                     }
+                    else
+                    {
+                        _logger.Warn($"PayPal webhook for order '{ctx.Order.OrderNumber}' ignored: '{payPalWebhookEvent.EventType}' events aren't handled.");
+                        return CallbackResult.Empty;
+                    }
 
                     return CallbackResult.Ok(
                         new TransactionInfo
@@ -276,6 +287,15 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal
 
             return CallbackResult.BadRequest();
         }
+
+        /// <summary>
+        /// Checks a <c>PAYMENT.*</c> webhook event is for a resource the callback handles:
+        /// an authorization, a capture or a refund.
+        /// </summary>
+        internal static bool IsHandledPaymentResourceType(string? resourceType)
+            => resourceType == PayPalWebhookEvent.ResourceTypes.Payment.AUTHORIZATION
+                || resourceType == PayPalWebhookEvent.ResourceTypes.Payment.CAPTURE
+                || resourceType == PayPalWebhookEvent.ResourceTypes.Payment.REFUND;
 
         /// <summary>
         /// Fetches the authorization or capture a <c>PAYMENT.*</c> webhook event refers to from PayPal.
