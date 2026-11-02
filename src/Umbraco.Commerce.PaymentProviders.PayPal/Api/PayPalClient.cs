@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.Caching;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -168,6 +169,34 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
                 .ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Gets a captured payment.
+        /// </summary>
+        internal async Task<PayPalCapturePayment> GetCapturePaymentAsync(string captureId, CancellationToken cancellationToken = default)
+        {
+            return await RequestAsync(
+                $"/v2/payments/captures/{Uri.EscapeDataString(captureId)}",
+                async (req, ct) => await req
+                .GetAsync(cancellationToken: ct)
+                .ReceiveJson<PayPalCapturePayment>().ConfigureAwait(false),
+                cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets an authorized payment.
+        /// </summary>
+        internal async Task<PayPalAuthorizationPayment> GetAuthorizationPaymentAsync(string authorizationId, CancellationToken cancellationToken = default)
+        {
+            return await RequestAsync(
+                $"/v2/payments/authorizations/{Uri.EscapeDataString(authorizationId)}",
+                async (req, ct) => await req
+                .GetAsync(cancellationToken: ct)
+                .ReceiveJson<PayPalAuthorizationPayment>().ConfigureAwait(false),
+                cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         public async Task<PayPalWebhookEvent> ParseWebhookEventAsync(HttpRequest request, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
@@ -193,29 +222,77 @@ namespace Umbraco.Commerce.PaymentProviders.PayPal.Api
                         TransmissionSignature = headers["paypal-transmission-sig"].FirstOrDefault(),
                         TransmissionTime = headers["paypal-transmission-time"].FirstOrDefault(),
                         WebhookId = _config.WebhookId,
-                        WebhookEvent = new { }
                     };
 
-                    string webhookSignatureRequestStr = JsonSerializer.Serialize(webhookSignatureRequest).Replace("{}", json, StringComparison.InvariantCulture);
-
-                    PayPalVerifyWebhookSignatureResult result = await RequestAsync(
-                            "/v1/notifications/verify-webhook-signature",
-                            async (req, ct) => await req
-                                .WithHeader("Content-Type", "application/json")
-                                .PostStringAsync(webhookSignatureRequestStr, cancellationToken: ct)
-                                .ReceiveJson<PayPalVerifyWebhookSignatureResult>()
-                                .ConfigureAwait(false),
-                            cancellationToken)
-                        .ConfigureAwait(false);
-
-                    if (result != null && result.VerificationStatus == "SUCCESS")
+                    string? webhookSignatureRequestStr = CreateVerifyWebhookSignatureRequestBody(webhookSignatureRequest, json);
+                    if (webhookSignatureRequestStr != null)
                     {
-                        payPalWebhookEvent = JsonSerializer.Deserialize<PayPalWebhookEvent>(json);
+                        PayPalVerifyWebhookSignatureResult result = await RequestAsync(
+                                "/v1/notifications/verify-webhook-signature",
+                                async (req, ct) => await req
+                                    .WithHeader("Content-Type", "application/json")
+                                    .PostStringAsync(webhookSignatureRequestStr, cancellationToken: ct)
+                                    .ReceiveJson<PayPalVerifyWebhookSignatureResult>()
+                                    .ConfigureAwait(false),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+
+                        if (result != null && result.VerificationStatus == "SUCCESS")
+                        {
+                            payPalWebhookEvent = JsonSerializer.Deserialize<PayPalWebhookEvent>(json);
+                        }
                     }
                 }
             }
 
             return payPalWebhookEvent;
+        }
+
+        /// <summary>
+        /// Builds the verify-webhook-signature request body. The webhook event is embedded exactly as
+        /// received, and must be a JSON object; returns <c>null</c> if it isn't.
+        /// </summary>
+        internal static string? CreateVerifyWebhookSignatureRequestBody(PayPalVerifyWebhookSignatureRequest request, string webhookEventJson)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            if (string.IsNullOrWhiteSpace(webhookEventJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                using (JsonDocument webhookEvent = JsonDocument.Parse(webhookEventJson))
+                {
+                    if (webhookEvent.RootElement.ValueKind != JsonValueKind.Object)
+                    {
+                        return null;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                // Property names match the [JsonPropertyName] attributes on PayPalVerifyWebhookSignatureRequest
+                writer.WriteStartObject();
+                writer.WriteString("auth_algo", request.AuthAlgorithm);
+                writer.WriteString("cert_url", request.CertUrl);
+                writer.WriteString("transmission_id", request.TransmissionId);
+                writer.WriteString("transmission_sig", request.TransmissionSignature);
+                writer.WriteString("transmission_time", request.TransmissionTime);
+                writer.WriteString("webhook_id", request.WebhookId);
+                writer.WritePropertyName("webhook_event");
+                writer.WriteRawValue(webhookEventJson);
+                writer.WriteEndObject();
+            }
+
+            return Encoding.UTF8.GetString(buffer.ToArray());
         }
 
         private async Task<TResult> RequestAsync<TResult>(string url, Func<IFlurlRequest, CancellationToken, Task<TResult>> func, CancellationToken cancellationToken = default)
